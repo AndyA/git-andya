@@ -387,6 +387,85 @@ __git_complete_revlist ()
 	esac
 }
 
+__git_complete_remote_or_refspec ()
+{
+	local cmd="${COMP_WORDS[1]}"
+	local cur="${COMP_WORDS[COMP_CWORD]}"
+	local i c=2 remote="" pfx="" lhs=1 no_complete_refspec=0
+	while [ $c -lt $COMP_CWORD ]; do
+		i="${COMP_WORDS[c]}"
+		case "$i" in
+		--all|--mirror) [ "$cmd" = "push" ] && no_complete_refspec=1 ;;
+		-*) ;;
+		*) remote="$i"; break ;;
+		esac
+		c=$((++c))
+	done
+	if [ -z "$remote" ]; then
+		__gitcomp "$(__git_remotes)"
+		return
+	fi
+	if [ $no_complete_refspec = 1 ]; then
+		COMPREPLY=()
+		return
+	fi
+	[ "$remote" = "." ] && remote=
+	case "$cur" in
+	*:*)
+		case "$COMP_WORDBREAKS" in
+		*:*) : great ;;
+		*)   pfx="${cur%%:*}:" ;;
+		esac
+		cur="${cur#*:}"
+		lhs=0
+		;;
+	+*)
+		pfx="+"
+		cur="${cur#+}"
+		;;
+	esac
+	case "$cmd" in
+	fetch)
+		if [ $lhs = 1 ]; then
+			__gitcomp "$(__git_refs2 "$remote")" "$pfx" "$cur"
+		else
+			__gitcomp "$(__git_refs)" "$pfx" "$cur"
+		fi
+		;;
+	pull)
+		if [ $lhs = 1 ]; then
+			__gitcomp "$(__git_refs "$remote")" "$pfx" "$cur"
+		else
+			__gitcomp "$(__git_refs)" "$pfx" "$cur"
+		fi
+		;;
+	push)
+		if [ $lhs = 1 ]; then
+			__gitcomp "$(__git_refs)" "$pfx" "$cur"
+		else
+			__gitcomp "$(__git_refs "$remote")" "$pfx" "$cur"
+		fi
+		;;
+	esac
+}
+
+__git_complete_strategy ()
+{
+	case "${COMP_WORDS[COMP_CWORD-1]}" in
+	-s|--strategy)
+		__gitcomp "$(__git_merge_strategies)"
+		return 0
+	esac
+	local cur="${COMP_WORDS[COMP_CWORD]}"
+	case "$cur" in
+	--strategy=*)
+		__gitcomp "$(__git_merge_strategies)" "" "${cur##--strategy=}"
+		return 0
+		;;
+	esac
+	return 1
+}
+
 __git_all_commands ()
 {
 	if [ -n "${__git_all_commandlist-}" ]; then
@@ -830,27 +909,21 @@ _git_diff ()
 	__git_complete_file
 }
 
+__git_fetch_options="
+	--quiet --verbose --append --upload-pack --force --keep --depth=
+	--tags --no-tags
+"
+
 _git_fetch ()
 {
 	local cur="${COMP_WORDS[COMP_CWORD]}"
-
-	if [ "$COMP_CWORD" = 2 ]; then
-		__gitcomp "$(__git_remotes)"
-	else
-		case "$cur" in
-		*:*)
-			local pfx=""
-			case "$COMP_WORDBREAKS" in
-			*:*) : great ;;
-			*)   pfx="${cur%%:*}:" ;;
-			esac
-			__gitcomp "$(__git_refs)" "$pfx" "${cur#*:}"
-			;;
-		*)
-			__gitcomp "$(__git_refs2 "${COMP_WORDS[2]}")"
-			;;
-		esac
-	fi
+	case "$cur" in
+	--*)
+		__gitcomp "$__git_fetch_options"
+		return
+		;;
+	esac
+	__git_complete_remote_or_refspec
 }
 
 _git_format_patch ()
@@ -1054,24 +1127,19 @@ _git_log ()
 	__git_complete_revlist
 }
 
+__git_merge_options="
+	--no-commit --no-stat --log --no-log --squash --strategy
+	--commit --stat --no-squash --ff --no-ff
+"
+
 _git_merge ()
 {
+	__git_complete_strategy && return
+
 	local cur="${COMP_WORDS[COMP_CWORD]}"
-	case "${COMP_WORDS[COMP_CWORD-1]}" in
-	-s|--strategy)
-		__gitcomp "$(__git_merge_strategies)"
-		return
-	esac
 	case "$cur" in
-	--strategy=*)
-		__gitcomp "$(__git_merge_strategies)" "" "${cur##--strategy=}"
-		return
-		;;
 	--*)
-		__gitcomp "
-			--no-commit --no-stat --log --no-log --squash --strategy
-			--commit --stat --no-squash --ff --no-ff
-			"
+		__gitcomp "$__git_merge_options"
 		return
 	esac
 	__gitcomp "$(__git_refs)"
@@ -1120,40 +1188,44 @@ _git_name_rev ()
 
 _git_pull ()
 {
-	local cur="${COMP_WORDS[COMP_CWORD]}"
+	__git_complete_strategy && return
 
-	if [ "$COMP_CWORD" = 2 ]; then
-		__gitcomp "$(__git_remotes)"
-	else
-		__gitcomp "$(__git_refs "${COMP_WORDS[2]}")"
-	fi
+	local cur="${COMP_WORDS[COMP_CWORD]}"
+	case "$cur" in
+	--*)
+		__gitcomp "
+			--rebase --no-rebase
+			$__git_merge_options
+			$__git_fetch_options
+		"
+		return
+		;;
+	esac
+	__git_complete_remote_or_refspec
 }
 
 _git_push ()
 {
 	local cur="${COMP_WORDS[COMP_CWORD]}"
-
-	if [ "$COMP_CWORD" = 2 ]; then
+	case "${COMP_WORDS[COMP_CWORD-1]}" in
+	--repo)
 		__gitcomp "$(__git_remotes)"
-	else
-		case "$cur" in
-		*:*)
-			local pfx=""
-			case "$COMP_WORDBREAKS" in
-			*:*) : great ;;
-			*)   pfx="${cur%%:*}:" ;;
-			esac
-
-			__gitcomp "$(__git_refs "${COMP_WORDS[2]}")" "$pfx" "${cur#*:}"
-			;;
-		+*)
-			__gitcomp "$(__git_refs)" + "${cur#+}"
-			;;
-		*)
-			__gitcomp "$(__git_refs)"
-			;;
-		esac
-	fi
+		return
+	esac
+	case "$cur" in
+	--repo=*)
+		__gitcomp "$(__git_remotes)" "" "${cur##--repo=}"
+		return
+		;;
+	--*)
+		__gitcomp "
+			--all --mirror --tags --dry-run --force --verbose
+			--receive-pack= --repo=
+		"
+		return
+		;;
+	esac
+	__git_complete_remote_or_refspec
 }
 
 _git_rebase ()
@@ -1163,16 +1235,8 @@ _git_rebase ()
 		__gitcomp "--continue --skip --abort"
 		return
 	fi
-	case "${COMP_WORDS[COMP_CWORD-1]}" in
-	-s|--strategy)
-		__gitcomp "$(__git_merge_strategies)"
-		return
-	esac
+	__git_complete_strategy && return
 	case "$cur" in
-	--strategy=*)
-		__gitcomp "$(__git_merge_strategies)" "" "${cur##--strategy=}"
-		return
-		;;
 	--*)
 		__gitcomp "--onto --merge --strategy --interactive"
 		return
